@@ -1,0 +1,6 @@
+{
+  "name": "MyQuery Agent",
+  "description": "MyQuery Agent: Two-agent conversational Text-to-SQL workbench featuring multi-format dataset ingestion, data-quality profiling, sandboxed read-only SQLite execution with bounded self-repair, four-level verification, and a downloadable local Qwen2.5 Google Colab notebook.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
