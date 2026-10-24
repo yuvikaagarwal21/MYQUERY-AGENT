@@ -16,7 +16,9 @@ function stripSqlCommentsAndLiteralsForInspection(sql: string): string {
   const withoutComments = sql
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/--.*$/gm, ' ');
-  return withoutComments.replace(/'(?:''|[^'])*'/g, "''");
+  return withoutComments
+    .replace(/'(?:''|[^'])*'/g, "''")
+    .replace(/"(?:""|[^"])*"/g, '""');
 }
 
 export function validateReadOnlySql(rawSql: string): SandboxValidationResult {

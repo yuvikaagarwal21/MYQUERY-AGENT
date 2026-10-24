@@ -117,6 +117,18 @@ export type PipelineErrorCategory =
   | 'abstention'
   | 'ambiguous';
 
+export interface SemanticColumnMatch {
+  userConcept: string;
+  matchedTable: string;
+  matchedColumn: string;
+  scaleDirection:
+    | 'higher_is_better'
+    | 'lower_is_better'
+    | 'categorical_meaning'
+    | 'neutral';
+  interpretationNote: string;
+}
+
 export interface Agent1Decomposition {
   status: 'answerable' | 'ambiguous' | 'unanswerable' | 'destructive_blocked';
   reasoning: string;
@@ -129,6 +141,12 @@ export interface Agent1Decomposition {
   expectedAggregations: string[];
   requiresJoin: boolean;
   requiresTopN: boolean;
+  semanticMappings?: SemanticColumnMatch[];
+  availableIndicators?: string[];
+  missingContextFactors?: string[];
+  inferredThresholdOrRule?: string;
+  isSensitiveDecision?: boolean;
+  sensitiveDecisionTopic?: string;
   clarificationPrompt?: string;
   clarificationOptions?: string[];
   abstentionReason?: string;
@@ -181,6 +199,11 @@ export interface VerifiedFigure {
 
 export interface Agent1Explanation {
   directTakeaway: string;
+  analyticalCriteriaUsed?: string;
+  recordReasoning?: string[];
+  missingInformation?: string[];
+  assumptionsAndLimitations?: string[];
+  sensitiveDecisionDisclaimer?: string;
   verifiedFigures: VerifiedFigure[];
   dataQualityDisclosures: string[];
 }

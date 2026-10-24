@@ -76,6 +76,37 @@ function buildDynamicExampleQuestions(
   if (!schemaState || schemaState.tables.length === 0) return [];
   const examples: string[] = [];
   const primaryTable: TableProfile = schemaState.tables[0];
+  const allCols = schemaState.tables.flatMap((t) => t.columns);
+
+  const hasPerformanceLike = allCols.some((c) =>
+    /perf|rating|kpi|score|eval|target|quota|productiv/i.test(
+      `${c.columnName} ${c.sourceHeader}`
+    )
+  );
+  const hasCompLike = allCols.some((c) =>
+    /sal|pay|comp|wage|bonus|income/i.test(`${c.columnName} ${c.sourceHeader}`)
+  );
+  const hasProfitLike = allCols.some((c) =>
+    /profit|margin|roi/i.test(`${c.columnName} ${c.sourceHeader}`)
+  );
+  const hasSalesOrCostLike = allCols.some((c) =>
+    /sales|revenue|cost|spend|units/i.test(`${c.columnName} ${c.sourceHeader}`)
+  );
+
+  if (hasPerformanceLike && hasCompLike) {
+    examples.push('Who deserves a raise?');
+    examples.push('Which records are underpaid relative to their performance?');
+  } else if (hasPerformanceLike) {
+    examples.push('Who should be considered for promotion or recognition?');
+    examples.push('Show records with performance below the dataset average.');
+  } else if (hasProfitLike && hasSalesOrCostLike) {
+    examples.push(
+      'Which items or categories generate the highest profit relative to cost?'
+    );
+    examples.push(
+      'Which items should be reviewed or discontinued based on sales and profitability?'
+    );
+  }
 
   const numCol = primaryTable.columns.find(
     (c) =>
@@ -85,7 +116,8 @@ function buildDynamicExampleQuestions(
     (c) => c.inferredType === 'categorical' || c.inferredType === 'text'
   );
   const missingCol = primaryTable.columns.find(
-    (c) => c.dirtyProfile.totalDirtyCount > 0 || c.dirtyProfile.nullOrEmptyCount > 0
+    (c) =>
+      c.dirtyProfile.totalDirtyCount > 0 || c.dirtyProfile.nullOrEmptyCount > 0
   );
 
   if (numCol && catCol) {
@@ -804,9 +836,9 @@ export function QueryWorkspace({
               )}
             </div>
 
-            {/* Query Output Table */}
+            {/* Query Output Table & Natural Language Explanation */}
             {result.executionOutput && (
-              <div className="p-5 space-y-3">
+              <div className="p-5 space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-3">
                     <h2 className="text-sm font-semibold text-slate-900">
@@ -835,10 +867,58 @@ export function QueryWorkspace({
                   )}
                 </div>
 
+                {/* Responsible Sensitive-Decision Framing Notice */}
+                {result.agent1Explanation?.sensitiveDecisionDisclaimer &&
+                  result.agent1Explanation.sensitiveDecisionDisclaimer.trim()
+                    .length > 0 && (
+                    <div className="bg-amber-50/70 border border-amber-200 rounded-lg px-4 py-3 text-xs text-amber-950 leading-relaxed">
+                      <span className="font-semibold">Decision Context: </span>
+                      {result.agent1Explanation.sensitiveDecisionDisclaimer}
+                    </div>
+                  )}
+
+                {/* Natural-Language Takeaway, Analytical Criteria & Record Evidence */}
                 {result.agent1Explanation?.directTakeaway && (
-                  <p className="text-sm text-slate-700 leading-relaxed">
-                    {result.agent1Explanation.directTakeaway}
-                  </p>
+                  <div className="space-y-2.5">
+                    <p className="text-sm text-slate-800 leading-relaxed">
+                      {result.agent1Explanation.directTakeaway}
+                    </p>
+                    {result.agent1Explanation.analyticalCriteriaUsed && (
+                      <p className="text-xs text-slate-600 leading-relaxed">
+                        <span className="font-semibold text-slate-700">
+                          Analytical criteria:{' '}
+                        </span>
+                        {result.agent1Explanation.analyticalCriteriaUsed}
+                      </p>
+                    )}
+                    {result.agent1Decomposition.semanticMappings &&
+                      result.agent1Decomposition.semanticMappings.length > 0 && (
+                        <div className="text-xs text-slate-500 font-mono">
+                          Evaluated indicators:{' '}
+                          {result.agent1Decomposition.semanticMappings
+                            .map(
+                              (m) =>
+                                `"${m.userConcept}" → ${m.matchedTable}.${m.matchedColumn}`
+                            )
+                            .join(' · ')}
+                        </div>
+                      )}
+                    {result.agent1Explanation.recordReasoning &&
+                      result.agent1Explanation.recordReasoning.length > 0 && (
+                        <div className="pt-1 space-y-1 text-xs text-slate-700">
+                          <div className="font-semibold text-slate-800">
+                            Why these records appear
+                          </div>
+                          {result.agent1Explanation.recordReasoning.map(
+                            (reason, idx) => (
+                              <div key={idx} className="leading-relaxed">
+                                · {reason}
+                              </div>
+                            )
+                          )}
+                        </div>
+                      )}
+                  </div>
                 )}
 
                 {result.executionOutput.rows.length === 0 ? (
@@ -895,13 +975,65 @@ export function QueryWorkspace({
                   </div>
                 )}
 
+                {/* Missing Context, Assumptions, Limitations & Data Quality Disclosures */}
                 {result.agent1Explanation &&
-                  result.agent1Explanation.dataQualityDisclosures.length > 0 && (
-                    <div className="text-xs text-slate-500 space-y-0.5 pt-1">
-                      {result.agent1Explanation.dataQualityDisclosures.map(
-                        (note, idx) => (
-                          <div key={idx}>Note: {note}</div>
-                        )
+                  ((result.agent1Explanation.missingInformation &&
+                    result.agent1Explanation.missingInformation.length > 0) ||
+                    (result.agent1Explanation.assumptionsAndLimitations &&
+                      result.agent1Explanation.assumptionsAndLimitations
+                        .length > 0) ||
+                    result.agent1Explanation.dataQualityDisclosures.length >
+                      0) && (
+                    <div className="pt-3 border-t border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-600">
+                      {result.agent1Explanation.missingInformation &&
+                        result.agent1Explanation.missingInformation.length >
+                          0 && (
+                          <div className="space-y-1">
+                            <div className="font-semibold text-slate-700">
+                              Missing Context & Unobserved Factors
+                            </div>
+                            {result.agent1Explanation.missingInformation.map(
+                              (item, idx) => (
+                                <div key={idx} className="leading-relaxed">
+                                  · {item}
+                                </div>
+                              )
+                            )}
+                          </div>
+                        )}
+                      {((result.agent1Explanation.assumptionsAndLimitations &&
+                        result.agent1Explanation.assumptionsAndLimitations
+                          .length > 0) ||
+                        result.agent1Explanation.dataQualityDisclosures.length >
+                          0) && (
+                        <div className="space-y-2">
+                          {result.agent1Explanation.assumptionsAndLimitations &&
+                            result.agent1Explanation.assumptionsAndLimitations
+                              .length > 0 && (
+                              <div className="space-y-1">
+                                <div className="font-semibold text-slate-700">
+                                  Assumptions & Limitations
+                                </div>
+                                {result.agent1Explanation.assumptionsAndLimitations.map(
+                                  (item, idx) => (
+                                    <div key={idx} className="leading-relaxed">
+                                      · {item}
+                                    </div>
+                                  )
+                                )}
+                              </div>
+                            )}
+                          {result.agent1Explanation.dataQualityDisclosures
+                            .length > 0 && (
+                            <div className="space-y-0.5 text-slate-500">
+                              {result.agent1Explanation.dataQualityDisclosures.map(
+                                (note, idx) => (
+                                  <div key={idx}>Data note: {note}</div>
+                                )
+                              )}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}

@@ -92,30 +92,46 @@ export function verifyIntent(
     }
   }
 
+  const usesScalarSubqueryAgg =
+    /\(\s*SELECT\b[\s\S]*?\b(AVG|MIN|MAX|SUM|COUNT)\s*\(/i.test(sql);
+  const usesWindowPartition =
+    /\bOVER\s*\([\s\S]*?\bPARTITION\s+BY\b/i.test(sql);
+
   if (
     decomposition.groupingDimensions.length > 0 &&
-    decomposition.expectedAggregations.length > 0
+    decomposition.expectedAggregations.length > 0 &&
+    !usesScalarSubqueryAgg &&
+    !usesWindowPartition
   ) {
     if (!/\bGROUP\s+BY\b/i.test(sql)) {
       issues.push(
-        `Grouping dimension(s) [${decomposition.groupingDimensions.join(', ')}] requested without GROUP BY clause.`
+        `Grouping dimension(s) [${decomposition.groupingDimensions.join(', ')}] requested without GROUP BY or OVER (PARTITION BY ...) clause.`
       );
     } else {
       notes.push('GROUP BY clause matches dimensional breakdown.');
     }
+  } else if (usesWindowPartition) {
+    notes.push('Window PARTITION BY peer comparison verified.');
   }
 
   if (decomposition.requiresTopN) {
-    if (!/\bORDER\s+BY\b/i.test(sql)) {
+    const hasExtremeSubquery =
+      /\(\s*SELECT\s+(MIN|MAX)\s*\(/i.test(sql) ||
+      /\b(RANK|DENSE_RANK|ROW_NUMBER)\s*\(/i.test(sql);
+    if (!/\bORDER\s+BY\b/i.test(sql) && !hasExtremeSubquery) {
       issues.push('Top-N ranking intent requires an ORDER BY clause.');
     } else if (!/\bDESC\b/i.test(upperSql) && !/\bASC\b/i.test(upperSql)) {
       notes.push('ORDER BY present (implicit ASC ordering).');
     } else {
       notes.push('Ranking ORDER BY direction verified.');
     }
-    if (!/\bLIMIT\s+\d+/i.test(sql)) {
+    if (
+      !/\bLIMIT\s+\d+/i.test(sql) &&
+      !/\bWHERE\b/i.test(sql) &&
+      !hasExtremeSubquery
+    ) {
       issues.push('Top-N ranking intent requires an explicit LIMIT N clause.');
-    } else {
+    } else if (/\bLIMIT\s+\d+/i.test(sql)) {
       notes.push('Explicit LIMIT clause verified.');
     }
   }
@@ -308,7 +324,25 @@ function collectAllowedNumbers(
       for (const cnt of Object.values(c.dirtyProfile.sentinelTokens)) {
         allowed.push(cnt);
       }
+      if (c.numericStats) {
+        allowed.push(
+          c.numericStats.validCount,
+          c.numericStats.min,
+          c.numericStats.max,
+          c.numericStats.mean,
+          c.numericStats.median
+        );
+      }
+      if (c.topCategories) {
+        for (const cat of c.topCategories) {
+          allowed.push(cat.count, cat.percentage);
+        }
+      }
     }
+  }
+
+  if (output.totalMatchedRows !== undefined) {
+    allowed.push(output.totalMatchedRows);
   }
 
   return allowed;
@@ -362,19 +396,24 @@ export function verifyExplanation(
     }
   }
 
-  // Extract numeric claims from directTakeaway (ignoring years like 2023/2024 or Q1/Q2/top 3)
+  // Extract numeric claims from directTakeaway (ignoring years, quarter/half labels, scale ranges, or top/bottom N limits)
   const sanitizedTakeaway = explanation.directTakeaway
     .replace(/\b20\d{2}(-\d{2}(-\d{2})?)?\b/g, ' ') // strip ISO dates & years
-    .replace(/\bQ[1-4]\b/gi, ' ') // strip quarter labels
-    .replace(/\b(?:top|first|limit)\s+\d+\b/gi, ' ') // strip "top 3"
-    .replace(/\bORD-\d+\b|\bCUST-\d+\b|\bSHP-\d+\b/gi, ' '); // strip IDs
+    .replace(/\b[QH][1-4]\b/gi, ' ') // strip quarter/half labels
+    .replace(/\b\d+\s*(?:to|-|–)\s*\d+\s*(?:point\s+)?scale\b/gi, ' ') // strip scale descriptions like "1-5 scale"
+    .replace(
+      /\b(?:top|bottom|lowest|highest|first|last|limit)\s+\d+\b/gi,
+      ' '
+    ) // strip ranking limit phrases like "lowest 5"
+    .replace(/\b[A-Z]{2,5}-?\d+\b/gi, ' '); // strip alphanumeric IDs
 
-  const numberMatches = sanitizedTakeaway.match(/\$?\d{1,3}(?:,\d{3})+(?:\.\d+)?|\$?\d+(?:\.\d+)/g) || [];
+  const numberMatches =
+    sanitizedTakeaway.match(/\$?\d{1,3}(?:,\d{3})+(?:\.\d+)?|\$?\d+(?:\.\d+)/g) ||
+    [];
   for (const rawMatch of numberMatches) {
     const num = Number(rawMatch.replace(/[$,]/g, ''));
     if (!Number.isFinite(num)) continue;
-    // Small ordinal words like "1" or "2" or "3" in prose are fine if <= 3, check substantive metrics
-    if (num <= 3 && !rawMatch.includes('$') && !rawMatch.includes('.')) continue;
+    if (num <= 5 && !rawMatch.includes('$') && !rawMatch.includes('.')) continue;
 
     if (!matchesAnyAllowedNumber(num, allowedNumbers)) {
       ungroundedFigures.push(
